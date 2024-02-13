@@ -13,8 +13,13 @@ def main(test=False):
     env = CustomCartpole("human")
     print(env.reset())
     env.render()
+    act = False
     while True:
-        # env.step(0)
+        state,_,_,_,_ = env.step(0)
+        print(state)
+        # print("Norm", env.normalize_state(np.copy(state)))
+        env.render()
+        env.step(1)
         env.render()
         # plt.imshow(env.render())
         # img = plt.imshow(env.render())
