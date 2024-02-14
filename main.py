@@ -1,37 +1,37 @@
 import gymnasium as gym
-# from .policy import PPO 
 import numpy as np
 from matplotlib import pyplot as plt
-# from pyvirtualdisplay import Display
+
 from env import CustomCartpole
+from agent import MLPPolicy
+from ppo import PPO
 
 def main(test=False):
-    # display = Display(visible=False, size=(1400, 900))
-    # _ = display.start()
 
-    # env = gym.make('CartPole-v1',  render_mode="human")
-    env = CustomCartpole("human")
-    print(env.reset())
-    env.render()
-    act = False
-    while True:
-        state,_,_,_,_ = env.step(0)
-        print(state)
-        # print("Norm", env.normalize_state(np.copy(state)))
-        env.render()
-        env.step(1)
-        env.render()
-        # plt.imshow(env.render())
-        # img = plt.imshow(env.render())
-        # img
-        # imgenv.render()
-    # policy = PPO(env)
-    # success = policy.train()
-    # if success:
-    #     policy.validate()
-    # if test:
-    #     policy.test()
+    env = CustomCartpole()
+    agent_kwargs = {}
+    trainer_kwargs = {}
 
+    agent = MLPPolicy(
+        env.observation_space,
+        env.action_space
+        **agent_kwargs
+    )
+
+    trainer = PPO(
+        env,
+        agent,
+        **trainer_kwargs
+    )
+    trainer.learn()
+    if test:
+        env = CustomCartpole("human")
+        state, _ =  env.reset()
+        while True:
+            action = agent(state)
+            state,rew,term,trunc,_ = env.step(action)
+            if term or trunc:
+                state, _ =  env.reset()
 
 if __name__=="__main__":
     main()
