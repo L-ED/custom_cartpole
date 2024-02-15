@@ -1,5 +1,5 @@
 import torch
-from torch import nn
+from torch.distributions.categorical import Categorical
 
 def linear(inp_shape, out_shape, act, use_bn):
     layer = [
@@ -38,4 +38,15 @@ class ActorCritic(torch.nn.Module):
 
     def __init__(self, obs_space, act_space):
 
+        self.shared = False
         self.actor = MLP(obs_space, act_space)
+        self.value = MLP(obs_space, 1)
+
+    def step(self, obs):
+        distrib = Categorical(
+            logits=self.actor(obs))
+        act = distrib.sample()
+        log_prob = distrib.log_prob(act)
+        value = self.value(obs)
+        return act.numpy(), value.numpy(), log_prob.numpy()
+
