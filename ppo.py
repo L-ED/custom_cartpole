@@ -8,20 +8,22 @@ class Buffer:
     def __init__(self, obs_space, gamma=0.99, lambd=0.95) -> None:
         self.gamma = gamma
         self.lambd = lambd
-        # self.sts = np.zeros((0, obs_space), dtype=np.float32)
-        # self.act = np.zeros(0, dtype=np.float32)
-        self.rew = np.zeros(0, dtype=np.float32)
-        # self.val = np.zeros(0, dtype=np.float32)
-        self.sts = torch.zeros((0, obs_space))
-        self.act = torch.zeros(0)
-        # self.rew = torch.zeros(0)
-        self.val = torch.zeros(0)
-        self.log_probs = torch.zeros(0)
+        self.obs_space = obs_space
+        self.reset()
+        # # self.sts = np.zeros((0, obs_space), dtype=np.float32)
+        # # self.act = np.zeros(0, dtype=np.float32)
+        # self.rew = np.zeros(0, dtype=np.float32)
+        # # self.val = np.zeros(0, dtype=np.float32)
+        # self.sts = torch.zeros((0, obs_space))
+        # self.act = torch.zeros(0)
+        # # self.rew = torch.zeros(0)
+        # self.val = torch.zeros(0)
+        # self.log_probs = torch.zeros(0)
 
-        self.traj_lenght= 0
+        # self.traj_lenght= 0
 
-        self.rtg = np.zeros(0, dtype=np.float32) #np.array([])
-        self.adv = np.zeros(0, dtype=np.float32) #np.array([])
+        # self.rtg = np.zeros(0, dtype=np.float32) #np.array([])
+        # self.adv = np.zeros(0, dtype=np.float32) #np.array([])
 
 
     def collect(self, state, action, value, reward, log_prob):
@@ -83,7 +85,26 @@ class Buffer:
         # return data
         self.adv = torch.from_numpy(self.adv)
         self.rtg = torch.from_numpy(self.rtg)
+        
         return self.sts, self.act, self.rtg, self.adv, self.log_probs
+    
+
+    def reset(self):
+
+        # self.sts = np.zeros((0, obs_space), dtype=np.float32)
+        # self.act = np.zeros(0, dtype=np.float32)
+        self.rew = np.zeros(0, dtype=np.float32)
+        # self.val = np.zeros(0, dtype=np.float32)
+        self.sts = torch.zeros((0, self.obs_space))
+        self.act = torch.zeros(0)
+        # self.rew = torch.zeros(0)
+        self.val = torch.zeros(0)
+        self.log_probs = torch.zeros(0)
+
+        self.traj_lenght= 0
+
+        self.rtg = np.zeros(0, dtype=np.float32) #np.array([])
+        self.adv = np.zeros(0, dtype=np.float32) #np.array([])
 
 
     def normalize_advantage(self):
@@ -94,7 +115,10 @@ class Buffer:
 
 class PPO:
 
-    def __init__(self, env, agent, epochs=50, iters_per_epoch=4000, optim_iters=80, clip_eps=0.2) -> None:
+    def __init__(self, env, agent, seed=0, epochs=5000, iters_per_epoch=4000, optim_iters=80, clip_eps=0.2) -> None:
+
+        torch.manual_seed(seed)
+        np.random.seed(seed)
 
         self.agent = agent
         self.env = env
@@ -108,6 +132,7 @@ class PPO:
 
         if self.agent.shared:
             self.policy_optim = Adam(self.agent.parameters(), lr= 5e-4)
+            self.value_optim=None
         else:
             self.policy_optim = Adam(self.agent.policy.parameters(), lr= 3e-4)
             self.value_optim = Adam(self.agent.value.parameters(), lr=1e-3)
@@ -119,7 +144,7 @@ class PPO:
             traj_num = 0
             reward_collector = 0
             for iteration in range(self.epoch_iters):
-                state =  torch.as_tensor(state, dtype=torch.float32).unsqueeze(0)
+                state = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0)
 
                 action, val, log_prob = self.agent.step(state)
                 next_state,rew,term,trunc,_ = self.env.step(action.item())
@@ -150,18 +175,17 @@ class PPO:
 
         data=self.buffer.get()
 
-        p_loss, v_loss = self.loss(data)
+        loss = self.loss(data)
+        loss.backward()
 
-        if self.agent.shared:
-            p_loss += v_loss
-        else:
-            v_loss.backward()
+        if self.value_optim is not None:
             self.value_optim.step()
             self.value_optim.zero_grad()
 
-        p_loss.backward()
         self.policy_optim.step()
         self.policy_optim.zero_grad()
+
+        self.buffer.reset()
 
         
     def loss(self, data):
@@ -175,9 +199,9 @@ class PPO:
         p_loss = -torch.min(ratio*adv, ratio_cliped*adv).mean()
 
         if self.agent.shared:
-            p_loss += pi.entropy()
+            p_loss -= pi.entropy()
 
         v_loss = ((self.agent.value(states) - rtg)**2).mean()
 
-        return p_loss, v_loss
+        return p_loss+v_loss
     

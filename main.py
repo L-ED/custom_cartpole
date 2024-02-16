@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
 from matplotlib import pyplot as plt
+import torch
 
 from env import CustomCartpole
 from agent import ActorCritic
@@ -28,8 +29,10 @@ def main(test=False):
         env = CustomCartpole("human")
         state, _ =  env.reset()
         while True:
-            action = agent(state)
-            state,rew,term,trunc,_ = env.step(action)
+
+            state = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0)
+            action, val, log_prob = agent.step(state)
+            state,rew,term,trunc,_ = env.step(action.item())
             if term or trunc:
                 state, _ =  env.reset()
 

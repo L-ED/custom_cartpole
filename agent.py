@@ -18,7 +18,7 @@ class MLP(torch.nn.Module):
             self, 
             inp_shape, 
             out_shape, 
-            hidden_shape=64, 
+            hidden_shape=32, 
             hidden_num=1, 
             act= torch.nn.ReLU, 
             use_bn = False
