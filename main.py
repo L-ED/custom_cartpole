@@ -3,7 +3,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from env import CustomCartpole
-from agent import MLPPolicy
+from agent import ActorCritic
 from ppo import PPO
 
 def main(test=False):
@@ -12,9 +12,9 @@ def main(test=False):
     agent_kwargs = {}
     trainer_kwargs = {}
 
-    agent = MLPPolicy(
+    agent = ActorCritic(
         env.observation_space,
-        env.action_space
+        env.action_space,
         **agent_kwargs
     )
 

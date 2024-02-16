@@ -6,7 +6,7 @@ import math
 
 class CustomCartpole(CartPoleEnv):
     # positive rotation 
-    def __init__(self, render_mode: str | None = None):
+    def __init__(self, render_mode = None):
         super().__init__(render_mode)
 
         self.x_threshold = 5
@@ -28,7 +28,7 @@ class CustomCartpole(CartPoleEnv):
         self.observation_space = spaces.Box(-high, high, dtype=np.float32)
 
 
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
+    def reset(self, *, seed = None, options = None):
         state, info = super().reset(seed=seed, options=options)
         state[2] = +np.pi
         # state[3] = -5

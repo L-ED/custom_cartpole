@@ -5,36 +5,50 @@ import scipy
 
 class Buffer:
     # folder for collecting stat-acttion pairs
-    def __init__(self, gamma, lambd) -> None:
+    def __init__(self, obs_space, gamma=0.99, lambd=0.95) -> None:
         self.gamma = gamma
         self.lambd = lambd
-        self.sts = np.zeros(0)
-        self.act = np.zeros(0)
-        self.rew = np.zeros(0)
-        self.val = np.zeros(0)
-        self.log_probs = np.zeros(0)
+        # self.sts = np.zeros((0, obs_space), dtype=np.float32)
+        # self.act = np.zeros(0, dtype=np.float32)
+        self.rew = np.zeros(0, dtype=np.float32)
+        # self.val = np.zeros(0, dtype=np.float32)
+        self.sts = torch.zeros((0, obs_space))
+        self.act = torch.zeros(0)
+        # self.rew = torch.zeros(0)
+        self.val = torch.zeros(0)
+        self.log_probs = torch.zeros(0)
 
         self.traj_lenght= 0
 
-        self.rtg = np.zeros(0) #np.array([])
-        self.adv = np.zeros(0) #np.array([])
+        self.rtg = np.zeros(0, dtype=np.float32) #np.array([])
+        self.adv = np.zeros(0, dtype=np.float32) #np.array([])
 
 
     def collect(self, state, action, value, reward, log_prob):
 
-        self.sts = np.append(self.sts, state)
-        self.act = np.append(self.act, action)
+        # self.sts = np.vstack((
+        #     self.sts,
+        #     state 
+        # ))
+
+        # self.sts = np.append(self.sts, state)
+        # self.act = np.append(self.act, action)
         self.rew = np.append(self.rew, reward)
-        self.val = np.append(self.val, value)
-        self.log_probs = np.append(self.log_probs, log_prob)
+        # self.val = np.append(self.val, value)
+
+        self.sts = torch.cat((self.sts, state))
+        self.act = torch.cat((self.act, action))
+        # self.rew = torch.cat((self.rew, reward))
+        self.val = torch.cat((self.val, value))
+        self.log_probs = torch.cat((self.log_probs, log_prob.unsqueeze(0)))
     
         self.traj_lenght +=1
 
     
     def end_traj(self, last_val):
 
-        rew = self.rew[-self.traj_lenght:]
-        val = self.val[-self.traj_lenght:]
+        rew = self.rew[-self.traj_lenght:]#.numpy()
+        val = self.val[-self.traj_lenght:].detach().numpy()
 
         rew = np.append(rew, last_val)
         val = np.append(val, last_val)
@@ -47,23 +61,29 @@ class Buffer:
         self.adv = np.append(self.adv, adv)
         self.rtg = np.append(self.rtg, rtg)
 
+        self.traj_lenght =0
 
-    def discounted_sum(sequence, coef):
+
+    def discounted_sum(self, sequence, coef):
         return scipy.signal.lfilter(
             [1], [1, float(-coef)], sequence[::-1], axis=0)[::-1]
 
 
     def get(self):
         self.normalize_advantage()
-        data = [
-            self.sts, 
-            self.act, 
-            self.rtg,
-            self.adv, 
-            self.log_prob
-        ]
-        
-        return [torch.from_numpy(v) for v in data]
+        # data = [
+        #     self.sts, 
+        #     self.act, 
+        #     self.rtg,
+        #     self.adv, 
+        #     # self.log_prob
+        # ]
+        # data = [torch.from_numpy(v) for v in data]
+        # data.append(self.log_probs)
+        # return data
+        self.adv = torch.from_numpy(self.adv)
+        self.rtg = torch.from_numpy(self.rtg)
+        return self.sts, self.act, self.rtg, self.adv, self.log_probs
 
 
     def normalize_advantage(self):
@@ -74,7 +94,7 @@ class Buffer:
 
 class PPO:
 
-    def __init__(self, env, agent, epochs, iters_per_epoch, optim_iters, clip_eps=0.2) -> None:
+    def __init__(self, env, agent, epochs=50, iters_per_epoch=4000, optim_iters=80, clip_eps=0.2) -> None:
 
         self.agent = agent
         self.env = env
@@ -82,23 +102,27 @@ class PPO:
         self.epoch_iters = iters_per_epoch
         self.clip_eps = clip_eps
         self.optimization_iters = optim_iters
-        self.buffer = Buffer()
+        self.buffer = Buffer(
+            obs_space= env.observation_space.shape[0]
+        )
 
         if self.agent.shared:
-            self.policy_optim = Adam(self.agent)
+            self.policy_optim = Adam(self.agent.parameters(), lr= 5e-4)
         else:
-            self.policy_optim = Adam(self.agent.policy)
-            self.value_optim = Adam(self.agent.value)
+            self.policy_optim = Adam(self.agent.policy.parameters(), lr= 3e-4)
+            self.value_optim = Adam(self.agent.value.parameters(), lr=1e-3)
     
 
     def learn(self):
         state, info = self.env.reset()
-        for epoch in self.epochs:
+        for epoch in range(self.epochs):
             traj_num = 0
             reward_collector = 0
-            for iteration in self.epoch_iters:
-                action, val, log_prob = self.agent(state)
-                next_state,rew,term,trunc,_ = self.env.step()
+            for iteration in range(self.epoch_iters):
+                state =  torch.as_tensor(state, dtype=torch.float32).unsqueeze(0)
+
+                action, val, log_prob = self.agent.step(state)
+                next_state,rew,term,trunc,_ = self.env.step(action.item())
                 self.buffer.collect(state, action, val, rew, log_prob)
                 state = next_state
 
@@ -108,8 +132,10 @@ class PPO:
                     if term:
                         val = 0
                     else:
-                        _, val, _= self.agent(state)
-                
+                        _, val, _= self.agent.step(
+                            torch.as_tensor(state, dtype=torch.float32).unsqueeze(0))
+                        val = val.item()
+
                     self.buffer.end_traj(val)
                     state, info = self.env.reset()
                     traj_num +=1
@@ -124,26 +150,25 @@ class PPO:
 
         data=self.buffer.get()
 
-        for i in range(self.optimization_iters):
-            p_loss, v_loss = self.loss(data)
+        p_loss, v_loss = self.loss(data)
 
-            if self.agent.shared:
-                p_loss += v_loss
-            else:
-                v_loss.backward()
-                self.value_optim.step()
-                self.val_optim.zero_grad()
+        if self.agent.shared:
+            p_loss += v_loss
+        else:
+            v_loss.backward()
+            self.value_optim.step()
+            self.value_optim.zero_grad()
 
-            p_loss.backward()
-            self.policy_optim.step()
-            self.policy_optim.zero_grad()
+        p_loss.backward()
+        self.policy_optim.step()
+        self.policy_optim.zero_grad()
 
         
     def loss(self, data):
         
         states, act, rtg, adv, log_prob_old = data 
 
-        pi, log_prob = self.agent.policy(states, act)
+        pi, log_prob = self.agent.get_probs(states, act)
         ratio = torch.exp(log_prob - log_prob_old)
         ratio_cliped = torch.clamp(
             ratio, 1-self.clip_eps, 1+self.clip_eps)
