@@ -84,9 +84,10 @@ class ActorCritic(torch.nn.Module):
 
 
     def step(self, obs):
-        distrib = Categorical(
-            logits=self.policy(obs))
-        act = distrib.sample()
-        log_prob = distrib.log_prob(act)
-        value = self.value(obs).squeeze(-1)
+        with torch.no_grad():
+            distrib = Categorical(
+                logits=self.policy(obs))
+            act = distrib.sample()
+            log_prob = distrib.log_prob(act).squeeze(-1)
+            value = self.value(obs).squeeze(-1)
         return act, value, log_prob

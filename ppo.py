@@ -3,6 +3,8 @@ from torch.optim import Adam
 import numpy as np
 import scipy
 
+from torch.utils.data import Dataset, DataLoader
+
 class Buffer:
     # folder for collecting stat-acttion pairs
     def __init__(self, obs_space, gamma=0.99, lambd=0.95) -> None:
@@ -49,21 +51,22 @@ class Buffer:
     
     def end_traj(self, last_val):
 
-        rew = self.rew[-self.traj_lenght:]#.numpy()
-        val = self.val[-self.traj_lenght:].detach().numpy()
+        with torch.no_grad():
+            rew = self.rew[-self.traj_lenght:]#.numpy()
+            val = self.val[-self.traj_lenght:].detach().numpy()
 
-        rew = np.append(rew, last_val)
-        val = np.append(val, last_val)
+            rew = np.append(rew, last_val)
+            val = np.append(val, last_val)
 
-        delta = rew[:-1] + self.gamma*val[1:] - val[:-1]
+            delta = rew[:-1] + self.gamma*val[1:] - val[:-1]
 
-        adv = self.discounted_sum(delta, self.gamma*self.lambd)
-        rtg = self.discounted_sum(delta, self.gamma)
+            adv = self.discounted_sum(delta, self.gamma*self.lambd)
+            rtg = self.discounted_sum(delta, self.gamma)
 
-        self.adv = np.append(self.adv, adv)
-        self.rtg = np.append(self.rtg, rtg)
+            self.adv = np.append(self.adv, adv)
+            self.rtg = np.append(self.rtg, rtg)
 
-        self.traj_lenght =0
+            self.traj_lenght =0
 
 
     def discounted_sum(self, sequence, coef):
@@ -115,11 +118,12 @@ class Buffer:
 
 class PPO:
 
-    def __init__(self, env, agent, seed=0, epochs=5000, iters_per_epoch=4000, optim_iters=80, clip_eps=0.2, max_grad_norm=0.5) -> None:
+    def __init__(self, env, agent, seed=0, epochs=5000, batch_size=64, iters_per_epoch=4000, optim_iters=80, clip_eps=0.2, max_grad_norm=0.5) -> None:
 
         torch.manual_seed(seed)
         np.random.seed(seed)
 
+        self.batch_size = batch_size
         self.agent = agent
         self.env = env
         self.epochs = epochs
@@ -133,12 +137,15 @@ class PPO:
             obs_space= env.observation_space.shape[0]
         )
 
+
+        # self.policy_optim = Adam(self.agent.parameters(), lr= 1e-2)
+
         if self.agent.shared:
             self.policy_optim = Adam(self.agent.parameters(), lr= 5e-4)
             self.value_optim=None
         else:
-            self.policy_optim = Adam(self.agent.policy.parameters(), lr= 1e-2)
-            self.value_optim = Adam(self.agent.value.parameters(), lr=1e-3)
+            self.policy_optim = Adam(self.agent.policy.parameters(), lr= 1e-3)
+            self.value_optim = Adam(self.agent.value.parameters(), lr=1e-4)
     
 
     def learn(self):
@@ -169,10 +176,12 @@ class PPO:
                     state, info = self.env.reset()
                     traj_num +=1
             
-            msg = f"Epoch {epoch}: traj avg_rew {reward_collector/traj_num}"
+            msg = f"Epoch {epoch}: traj avg_rew {reward_collector/traj_num}, avg_traj_len {self.epoch_iters/traj_num}"
             print(msg)
 
-            self.update()
+            # self.update()
+            # self.update_iteratively()
+            self.update_manual()
 
 
     def update(self):
@@ -210,3 +219,73 @@ class PPO:
 
         return p_loss+v_loss
     
+
+    def create_dataloader(self, data):
+
+        return DataLoader(
+            BufferDataset(data),
+            batch_size=self.batch_size, 
+            shuffle=False,
+            num_workers=2
+        )
+    
+    def update_manual(self):
+
+        states, act, rtg, adv, log_prob_old=self.buffer.get()
+        b_inds = np.arange(len(rtg))
+        np.random.shuffle(b_inds)
+        for start in range(0, len(rtg), self.batch_size):
+            sample_idx = b_inds[start:start+64]
+            data = [
+                states[sample_idx], 
+                act[sample_idx], 
+                rtg[sample_idx], 
+                adv[sample_idx], 
+                log_prob_old[sample_idx]
+            ] 
+            loss = self.loss(data)
+            loss.backward()
+
+            if self.value_optim is not None:
+                self.value_optim.step()
+                self.value_optim.zero_grad()
+
+            torch.nn.utils.clip_grad_norm_(self.agent.parameters(), self.max_grad_norm)
+            self.policy_optim.step()
+            self.policy_optim.zero_grad()
+
+        self.buffer.reset()
+
+    def update_iteratively(self):
+
+        dataloader = self.create_dataloader(
+            self.buffer.get())
+
+        for data in dataloader:
+
+            loss = self.loss(data)
+            loss.backward()
+
+            # if self.value_optim is not None:
+                # self.value_optim.step()
+                # self.value_optim.zero_grad()
+
+            torch.nn.utils.clip_grad_norm_(self.agent.parameters(), self.max_grad_norm)
+            self.policy_optim.step()
+            self.policy_optim.zero_grad()
+
+        self.buffer.reset()
+
+
+class BufferDataset(Dataset):
+
+    def __init__(self, data):
+        super().__init__()
+
+        self.states, self.act, self.rtg, self.adv, self.log_prob = data
+
+    def __getitem__(self, index):
+        return self.states[index], self.act[index], self.rtg[index], self.adv[index], self.log_prob[index]
+
+    def __len__(self):
+        return len(self.rtg)

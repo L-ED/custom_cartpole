@@ -97,7 +97,11 @@ class CustomCartpole(CartPoleEnv):
 
 
     def calc_reward(self):
-        return np.cos(self.state[2])
+        ang_rew = np.cos(self.state[2])
+        norm_state = self.normalize_state(np.copy(self.state))
+        moment_rew = (norm_state[3]*norm_state[2])**2
+
+        return ang_rew + moment_rew
     
 
     def normalize_state(self, state):
