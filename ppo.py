@@ -134,22 +134,23 @@ class PPO:
             self.policy_optim = Adam(self.agent.parameters(), lr= 5e-4)
             self.value_optim=None
         else:
-            self.policy_optim = Adam(self.agent.policy.parameters(), lr= 3e-4)
-            self.value_optim = Adam(self.agent.value.parameters(), lr=1e-3)
+            self.policy_optim = Adam(self.agent.policy.parameters(), lr= 3e-3)
+            self.value_optim = Adam(self.agent.value.parameters(), lr=1e-2)
     
 
     def learn(self):
         state, info = self.env.reset()
+        state = self.env.normalize_state(state)
         for epoch in range(self.epochs):
             traj_num = 0
             reward_collector = 0
             for iteration in range(self.epoch_iters):
                 state = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0)
-
                 action, val, log_prob = self.agent.step(state)
                 next_state,rew,term,trunc,_ = self.env.step(action.item())
                 self.buffer.collect(state, action, val, rew, log_prob)
                 state = next_state
+                state = self.env.normalize_state(state)
 
                 last_iter = iteration == self.epoch_iters-1
                 reward_collector += rew
