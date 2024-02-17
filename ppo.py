@@ -115,7 +115,7 @@ class Buffer:
 
 class PPO:
 
-    def __init__(self, env, agent, seed=0, epochs=5000, iters_per_epoch=4000, optim_iters=80, clip_eps=0.2) -> None:
+    def __init__(self, env, agent, seed=0, epochs=5000, iters_per_epoch=4000, optim_iters=80, clip_eps=0.2, max_grad_norm=0.5) -> None:
 
         torch.manual_seed(seed)
         np.random.seed(seed)
@@ -126,6 +126,9 @@ class PPO:
         self.epoch_iters = iters_per_epoch
         self.clip_eps = clip_eps
         self.optimization_iters = optim_iters
+
+        self.max_grad_norm = max_grad_norm
+
         self.buffer = Buffer(
             obs_space= env.observation_space.shape[0]
         )
@@ -134,8 +137,8 @@ class PPO:
             self.policy_optim = Adam(self.agent.parameters(), lr= 5e-4)
             self.value_optim=None
         else:
-            self.policy_optim = Adam(self.agent.policy.parameters(), lr= 3e-3)
-            self.value_optim = Adam(self.agent.value.parameters(), lr=1e-2)
+            self.policy_optim = Adam(self.agent.policy.parameters(), lr= 1e-2)
+            self.value_optim = Adam(self.agent.value.parameters(), lr=1e-3)
     
 
     def learn(self):
@@ -183,6 +186,7 @@ class PPO:
             self.value_optim.step()
             self.value_optim.zero_grad()
 
+        torch.nn.utils.clip_grad_norm_(self.agent.parameters(), self.max_grad_norm)
         self.policy_optim.step()
         self.policy_optim.zero_grad()
 
@@ -199,8 +203,8 @@ class PPO:
             ratio, 1-self.clip_eps, 1+self.clip_eps)
         p_loss = -torch.min(ratio*adv, ratio_cliped*adv).mean()
 
-        if self.agent.shared:
-            p_loss -= pi.entropy()
+        # if self.agent.shared:
+        p_loss -= pi.entropy().mean()
 
         v_loss = ((self.agent.value(states) - rtg)**2).mean()
 
