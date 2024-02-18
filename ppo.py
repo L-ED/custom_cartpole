@@ -3,6 +3,7 @@ from torch.optim import Adam
 import numpy as np
 import scipy
 
+import torch.nn.functional as func
 from torch.utils.data import Dataset, DataLoader
 
 class Buffer:
@@ -75,7 +76,7 @@ class Buffer:
 
 
     def get(self):
-        self.normalize_advantage()
+        # self.normalize_advantage()
         # data = [
         #     self.sts, 
         #     self.act, 
@@ -86,8 +87,8 @@ class Buffer:
         # data = [torch.from_numpy(v) for v in data]
         # data.append(self.log_probs)
         # return data
-        self.adv = torch.from_numpy(self.adv)
-        self.rtg = torch.from_numpy(self.rtg)
+        self.adv = torch.from_numpy(self.adv).float()
+        self.rtg = torch.from_numpy(self.rtg).float()
         
         return self.sts, self.act, self.rtg, self.adv, self.log_probs
     
@@ -118,11 +119,12 @@ class Buffer:
 
 class PPO:
 
-    def __init__(self, env, agent, seed=0, epochs=5000, batch_size=64, iters_per_epoch=4000, optim_iters=80, clip_eps=0.2, max_grad_norm=0.5) -> None:
+    def __init__(self, env, agent, seed=0, epochs=200000, batch_size=64, iters_per_epoch=4000, optim_iters=10, clip_eps=0.2, max_grad_norm=0.5, vf_koef=0.5) -> None:
 
         torch.manual_seed(seed)
         np.random.seed(seed)
 
+        self.vf_koef = vf_koef
         self.batch_size = batch_size
         self.agent = agent
         self.env = env
@@ -206,6 +208,8 @@ class PPO:
         
         states, act, rtg, adv, log_prob_old = data 
 
+        adv = (adv - adv.mean())/adv.std()
+
         pi, log_prob = self.agent.get_probs(states, act)
         ratio = torch.exp(log_prob - log_prob_old)
         ratio_cliped = torch.clamp(
@@ -213,11 +217,11 @@ class PPO:
         p_loss = -torch.min(ratio*adv, ratio_cliped*adv).mean()
 
         # if self.agent.shared:
-        p_loss -= pi.entropy().mean()
+        # p_loss -= pi.entropy().mean()
 
-        v_loss = ((self.agent.value(states) - rtg)**2).mean()
+        v_loss = func.mse_loss(self.agent.value(states).flatten(), rtg)
 
-        return p_loss+v_loss
+        return p_loss, v_loss
     
 
     def create_dataloader(self, data):
@@ -231,6 +235,8 @@ class PPO:
     
     def update_manual(self):
 
+        p_loss_col, v_loss_col = np.zeros(0), np.zeros(0)
+
         states, act, rtg, adv, log_prob_old=self.buffer.get()
         b_inds = np.arange(len(rtg))
         np.random.shuffle(b_inds)
@@ -243,49 +249,63 @@ class PPO:
                 adv[sample_idx], 
                 log_prob_old[sample_idx]
             ] 
-            loss = self.loss(data)
+            p_loss, v_loss = self.loss(data)
+            loss = p_loss + v_loss*self.vf_koef
             loss.backward()
+
+            p_loss_col = np.append(p_loss_col, p_loss.item()) 
+            v_loss_col = np.append(v_loss_col, v_loss.item())
 
             if self.value_optim is not None:
                 self.value_optim.step()
                 self.value_optim.zero_grad()
 
-            torch.nn.utils.clip_grad_norm_(self.agent.parameters(), self.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(self.agent.policy.parameters(), self.max_grad_norm)
             self.policy_optim.step()
             self.policy_optim.zero_grad()
 
-        self.buffer.reset()
-
-    def update_iteratively(self):
-
-        dataloader = self.create_dataloader(
-            self.buffer.get())
-
-        for data in dataloader:
-
-            loss = self.loss(data)
-            loss.backward()
-
-            # if self.value_optim is not None:
-                # self.value_optim.step()
-                # self.value_optim.zero_grad()
-
-            torch.nn.utils.clip_grad_norm_(self.agent.parameters(), self.max_grad_norm)
-            self.policy_optim.step()
-            self.policy_optim.zero_grad()
+        print("v_loss", v_loss_col.mean(), "p_loss", p_loss_col.mean())
 
         self.buffer.reset()
 
 
-class BufferDataset(Dataset):
 
-    def __init__(self, data):
-        super().__init__()
 
-        self.states, self.act, self.rtg, self.adv, self.log_prob = data
 
-    def __getitem__(self, index):
-        return self.states[index], self.act[index], self.rtg[index], self.adv[index], self.log_prob[index]
 
-    def __len__(self):
-        return len(self.rtg)
+
+
+
+#     def update_iteratively(self):
+
+#         dataloader = self.create_dataloader(
+#             self.buffer.get())
+
+#         for data in dataloader:
+
+#             loss = self.loss(data)
+#             loss.backward()
+
+#             # if self.value_optim is not None:
+#                 # self.value_optim.step()
+#                 # self.value_optim.zero_grad()
+
+#             torch.nn.utils.clip_grad_norm_(self.agent.parameters(), self.max_grad_norm)
+#             self.policy_optim.step()
+#             self.policy_optim.zero_grad()
+
+#         self.buffer.reset()
+
+
+# class BufferDataset(Dataset):
+
+#     def __init__(self, data):
+#         super().__init__()
+
+#         self.states, self.act, self.rtg, self.adv, self.log_prob = data
+
+#     def __getitem__(self, index):
+#         return self.states[index], self.act[index], self.rtg[index], self.adv[index], self.log_prob[index]
+
+#     def __len__(self):
+#         return len(self.rtg)
