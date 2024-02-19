@@ -16,19 +16,24 @@ def linear(inp_shape, out_shape, act, use_bn, init_fn=None):
     return layer
 
 
-def layer_init_cleanrl(layer, std=math.sqrt(2), bias_const=0.0):
+def orthogonal_init(layer, std=math.sqrt(2), bias_const=0.0, last=False):
+    if last:
+        std = 0.01
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
-def glorot_init(layer, act='tanh', bias_const=0.0):
-    torch.nn.init.xavier_uniform_(layer.weight, act)
+def glorot_init(layer, act='tanh', bias_const=0.0, last=False):
+    gain = torch.nn.init.calculate_gain(act)
+    if last:
+        gain /=100
+    torch.nn.init.xavier_uniform_(layer.weight, gain)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
 
 initialisers = {
-    'glorot': glorot_init, 'cleanrl':layer_init_cleanrl
+    'glorot': glorot_init, 'ortho':orthogonal_init
 }
 
 class MLP(torch.nn.Module):
@@ -41,7 +46,7 @@ class MLP(torch.nn.Module):
             hidden_num=1, 
             act= torch.nn.Tanh, 
             use_bn = False,
-            weight_init = None
+            weight_init = 'glorot'#'ortho'#'glorot'
         ):
         super().__init__()
 
@@ -56,7 +61,10 @@ class MLP(torch.nn.Module):
 
         last = torch.nn.Linear(hidden_shape, out_shape)
         if init_fn is not None:
-            last = init_fn(last)
+            last = init_fn(
+                last, 
+                # last=True
+            )
         stem.append(last)
         self.stem = torch.nn.Sequential(*stem)
 

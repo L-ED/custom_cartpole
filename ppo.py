@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 
 class Buffer:
     # folder for collecting stat-acttion pairs
-    def __init__(self, obs_space, gamma=0.99, lambd=0.95) -> None:
+    def __init__(self, obs_space, gamma=0.99, lambd=1) -> None:
         self.gamma = gamma
         self.lambd = lambd
         self.obs_space = obs_space
@@ -65,7 +65,8 @@ class Buffer:
             rtg = self.discounted_sum(delta, self.gamma)
 
             self.adv = np.append(self.adv, adv)
-            self.rtg = np.append(self.rtg, rtg)
+            # self.rtg = np.append(self.rtg, rtg)
+            self.rtg = np.append(self.rtg, adv+val[:-1])
 
             self.traj_lenght =0
 
@@ -119,7 +120,7 @@ class Buffer:
 
 class PPO:
 
-    def __init__(self, env, agent, seed=0, epochs=200000, batch_size=64, iters_per_epoch=4000, optim_iters=10, clip_eps=0.2, max_grad_norm=0.5, vf_koef=0.5) -> None:
+    def __init__(self, env, agent, seed=0, epochs=200, batch_size=64, iters_per_epoch=8000, optim_iters=10, clip_eps=0.2, max_grad_norm=0.5, vf_koef=0.5) -> None:
 
         torch.manual_seed(seed)
         np.random.seed(seed)
@@ -140,20 +141,23 @@ class PPO:
         )
 
 
-        # self.policy_optim = Adam(self.agent.parameters(), lr= 1e-2)
+        self.policy_optim = Adam(self.agent.parameters(), lr= 1e-3)
+        self.value_optim=None
 
-        if self.agent.shared:
-            self.policy_optim = Adam(self.agent.parameters(), lr= 5e-4)
-            self.value_optim=None
-        else:
-            self.policy_optim = Adam(self.agent.policy.parameters(), lr= 1e-3)
-            self.value_optim = Adam(self.agent.value.parameters(), lr=1e-4)
+        # if self.agent.shared:
+        #     self.policy_optim = Adam(self.agent.parameters(), lr= 5e-4)
+        #     self.value_optim=None
+        # else:
+        #     self.policy_optim = Adam(self.agent.policy.parameters(), lr= 3e-4)
+        #     self.value_optim = Adam(self.agent.value.parameters(), lr=1e-3)
     
 
     def learn(self):
         state, info = self.env.reset()
         state = self.env.normalize_state(state)
         for epoch in range(self.epochs):
+            # if epoch == self.epochs/2:
+            #     self.env.enable_suggestions=False
             traj_num = 0
             reward_collector = 0
             for iteration in range(self.epoch_iters):

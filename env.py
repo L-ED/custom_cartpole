@@ -10,10 +10,11 @@ class CustomCartpole(CartPoleEnv):
         super().__init__(render_mode)
 
         self.x_threshold = 5
-        self.x_dot_threshold = 20
-        self.theta_dot_threshold = 20
+        self.x_dot_threshold = 15
+        self.theta_dot_threshold = 15
 
         self.max_episode_steps = 500
+        self.enable_suggestions = False
 
         high = np.array(
             [
@@ -31,10 +32,10 @@ class CustomCartpole(CartPoleEnv):
     def reset(self, *, seed = None, options = None):
         state, info = super().reset(seed=seed, options=options)
         state[2] = +np.pi
-        # state[3] = -5
+        if self.enable_suggestions:
+            state[3] = np.random.uniform(-self.theta_dot_threshold/2, self.theta_dot_threshold/2)
         self.state = state
         self.steps = 0
-        # self.steps_beyond_terminated = 0
 
         return state , info
 
@@ -99,9 +100,9 @@ class CustomCartpole(CartPoleEnv):
     def calc_reward(self):
         ang_rew = np.cos(self.state[2])
         norm_state = self.normalize_state(np.copy(self.state))
-        moment_rew = (norm_state[3]*norm_state[2])**2 + (1-norm_state[2]**2)*(1-norm_state[3]**2)
+        moment_rew = (1-norm_state[2]**2)*(1-norm_state[3]**2)#+((norm_state[3]*norm_state[2])**2)/2 
 
-        return ang_rew + moment_rew
+        return ang_rew + moment_rew 
     
 
     def normalize_state(self, state):

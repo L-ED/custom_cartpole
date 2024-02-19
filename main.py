@@ -7,7 +7,7 @@ from env import CustomCartpole
 from agent import ActorCritic
 from ppo import PPO
 
-def main(test=False):
+def main(test=True):
 
     env = CustomCartpole()
     agent_kwargs = {}
@@ -19,6 +19,7 @@ def main(test=False):
         **agent_kwargs
     )
 
+    env.enable_suggestions=True
     trainer = PPO(
         env,
         agent,
@@ -29,7 +30,6 @@ def main(test=False):
         env = CustomCartpole("human")
         state, _ =  env.reset()
         while True:
-
             state = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0)
             action, val, log_prob = agent.step(state)
             state,rew,term,trunc,_ = env.step(action.item())
