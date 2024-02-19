@@ -2,48 +2,25 @@ import torch
 from torch.optim import Adam
 import numpy as np
 import scipy
+import os
 
 import torch.nn.functional as func
 from torch.utils.data import Dataset, DataLoader
 
 class Buffer:
     # folder for collecting stat-acttion pairs
-    def __init__(self, obs_space, gamma=0.99, lambd=1) -> None:
+    def __init__(self, obs_space, gamma=0.99, lambd=0.97) -> None:
         self.gamma = gamma
         self.lambd = lambd
         self.obs_space = obs_space
         self.reset()
-        # # self.sts = np.zeros((0, obs_space), dtype=np.float32)
-        # # self.act = np.zeros(0, dtype=np.float32)
-        # self.rew = np.zeros(0, dtype=np.float32)
-        # # self.val = np.zeros(0, dtype=np.float32)
-        # self.sts = torch.zeros((0, obs_space))
-        # self.act = torch.zeros(0)
-        # # self.rew = torch.zeros(0)
-        # self.val = torch.zeros(0)
-        # self.log_probs = torch.zeros(0)
-
-        # self.traj_lenght= 0
-
-        # self.rtg = np.zeros(0, dtype=np.float32) #np.array([])
-        # self.adv = np.zeros(0, dtype=np.float32) #np.array([])
 
 
     def collect(self, state, action, value, reward, log_prob):
 
-        # self.sts = np.vstack((
-        #     self.sts,
-        #     state 
-        # ))
-
-        # self.sts = np.append(self.sts, state)
-        # self.act = np.append(self.act, action)
         self.rew = np.append(self.rew, reward)
-        # self.val = np.append(self.val, value)
-
         self.sts = torch.cat((self.sts, state))
         self.act = torch.cat((self.act, action))
-        # self.rew = torch.cat((self.rew, reward))
         self.val = torch.cat((self.val, value))
         self.log_probs = torch.cat((self.log_probs, log_prob.unsqueeze(0)))
     
@@ -62,11 +39,11 @@ class Buffer:
             delta = rew[:-1] + self.gamma*val[1:] - val[:-1]
 
             adv = self.discounted_sum(delta, self.gamma*self.lambd)
-            rtg = self.discounted_sum(delta, self.gamma)
+            rtg = self.discounted_sum(rew, self.gamma)[:-1]
 
             self.adv = np.append(self.adv, adv)
-            # self.rtg = np.append(self.rtg, rtg)
-            self.rtg = np.append(self.rtg, adv+val[:-1])
+            self.rtg = np.append(self.rtg, rtg)
+            # self.rtg = np.append(self.rtg, adv+val[:-1])
 
             self.traj_lenght =0
 
@@ -77,17 +54,7 @@ class Buffer:
 
 
     def get(self):
-        # self.normalize_advantage()
-        # data = [
-        #     self.sts, 
-        #     self.act, 
-        #     self.rtg,
-        #     self.adv, 
-        #     # self.log_prob
-        # ]
-        # data = [torch.from_numpy(v) for v in data]
-        # data.append(self.log_probs)
-        # return data
+
         self.adv = torch.from_numpy(self.adv).float()
         self.rtg = torch.from_numpy(self.rtg).float()
         
@@ -96,20 +63,16 @@ class Buffer:
 
     def reset(self):
 
-        # self.sts = np.zeros((0, obs_space), dtype=np.float32)
-        # self.act = np.zeros(0, dtype=np.float32)
         self.rew = np.zeros(0, dtype=np.float32)
-        # self.val = np.zeros(0, dtype=np.float32)
         self.sts = torch.zeros((0, self.obs_space))
         self.act = torch.zeros(0)
-        # self.rew = torch.zeros(0)
         self.val = torch.zeros(0)
         self.log_probs = torch.zeros(0)
 
         self.traj_lenght= 0
 
-        self.rtg = np.zeros(0, dtype=np.float32) #np.array([])
-        self.adv = np.zeros(0, dtype=np.float32) #np.array([])
+        self.rtg = np.zeros(0, dtype=np.float32)
+        self.adv = np.zeros(0, dtype=np.float32)
 
 
     def normalize_advantage(self):
@@ -120,11 +83,33 @@ class Buffer:
 
 class PPO:
 
-    def __init__(self, env, agent, seed=0, epochs=200, batch_size=64, iters_per_epoch=8000, optim_iters=10, clip_eps=0.2, max_grad_norm=0.5, vf_koef=0.5) -> None:
+    def __init__(
+            self, 
+            env, 
+            agent, 
+            seed=0, 
+            epochs=200, 
+            batch_size=64, 
+            iters_per_epoch=8000, 
+            optim_iters=10, 
+            clip_eps=0.2, 
+            max_grad_norm=0.5, 
+            vf_koef=0.5, 
+            entropy_kf = 0.0,
+            save_folder=None, 
+            save_best=True,
+            shared=True
+        ) -> None:
 
         torch.manual_seed(seed)
         np.random.seed(seed)
 
+        self.save_best=save_best
+        self.save_folder = save_folder
+        if self.save_folder is None:
+            self.save_folder = '/home/led/Simulators/Bullet/cartpole/weights'
+
+        self.entropy_kf = entropy_kf
         self.vf_koef = vf_koef
         self.batch_size = batch_size
         self.agent = agent
@@ -140,21 +125,20 @@ class PPO:
             obs_space= env.observation_space.shape[0]
         )
 
-
-        self.policy_optim = Adam(self.agent.parameters(), lr= 1e-3)
-        self.value_optim=None
-
-        # if self.agent.shared:
-        #     self.policy_optim = Adam(self.agent.parameters(), lr= 5e-4)
-        #     self.value_optim=None
-        # else:
-        #     self.policy_optim = Adam(self.agent.policy.parameters(), lr= 3e-4)
-        #     self.value_optim = Adam(self.agent.value.parameters(), lr=1e-3)
+        if shared:
+            self.policy_optim = Adam(self.agent.parameters(), lr= 1e-3)
+            self.value_optim=None
+        else:
+            self.policy_optim = Adam(self.agent.policy.parameters(), lr= 3e-4)
+            self.value_optim = Adam(self.agent.value.parameters(), lr=1e-3)
     
 
     def learn(self):
         state, info = self.env.reset()
         state = self.env.normalize_state(state)
+
+        best_rew = -float('inf')
+
         for epoch in range(self.epochs):
             # if epoch == self.epochs/2:
             #     self.env.enable_suggestions=False
@@ -182,12 +166,18 @@ class PPO:
                     state, info = self.env.reset()
                     traj_num +=1
             
-            msg = f"Epoch {epoch}: traj avg_rew {reward_collector/traj_num}, avg_traj_len {self.epoch_iters/traj_num}"
+            cur_avg_rew = reward_collector/traj_num
+            msg = f"Epoch {epoch}: traj avg_rew {cur_avg_rew}, avg_traj_len {self.epoch_iters/traj_num}"
             print(msg)
 
-            # self.update()
-            # self.update_iteratively()
-            self.update_manual()
+            if self.save_best:
+                if cur_avg_rew>best_rew:
+                    savepath=os.path.join(self.save_folder, 'best.pth')
+                    torch.save(self.agent.state_dict(), savepath)
+                    best_rew = cur_avg_rew
+                    print('save')
+            # self.update_manual()
+            self.update_multiple()
 
 
     def update(self):
@@ -221,21 +211,12 @@ class PPO:
         p_loss = -torch.min(ratio*adv, ratio_cliped*adv).mean()
 
         # if self.agent.shared:
-        # p_loss -= pi.entropy().mean()
+        p_loss -= pi.entropy().mean()*self.entropy_kf
 
         v_loss = func.mse_loss(self.agent.value(states).flatten(), rtg)
 
         return p_loss, v_loss
     
-
-    def create_dataloader(self, data):
-
-        return DataLoader(
-            BufferDataset(data),
-            batch_size=self.batch_size, 
-            shuffle=False,
-            num_workers=2
-        )
     
     def update_manual(self):
 
@@ -273,43 +254,55 @@ class PPO:
         self.buffer.reset()
 
 
+    def update_multiple(self):
+
+        p_loss_col, v_loss_col = np.zeros(0), np.zeros(0)
+
+        states, act, rtg, adv, log_prob_old=self.buffer.get()
+        b_inds = np.arange(len(rtg))
+
+        for upd_i in range(self.optimization_iters):
+            np.random.shuffle(b_inds)
+            for start in range(0, len(rtg), self.batch_size):
+                sample_idx = b_inds[start:start+64]
+                data = [
+                    states[sample_idx], 
+                    act[sample_idx], 
+                    rtg[sample_idx], 
+                    adv[sample_idx], 
+                    log_prob_old[sample_idx]
+                ] 
+                p_loss, v_loss = self.loss(data)
+                loss = p_loss + v_loss*self.vf_koef
+                loss.backward()
+
+                p_loss_col = np.append(p_loss_col, p_loss.item()) 
+                v_loss_col = np.append(v_loss_col, v_loss.item())
+
+                if self.value_optim is not None:
+                    self.value_optim.step()
+                    self.value_optim.zero_grad()
+
+                torch.nn.utils.clip_grad_norm_(self.agent.policy.parameters(), self.max_grad_norm)
+                self.policy_optim.step()
+                self.policy_optim.zero_grad()
+
+        print("v_loss", v_loss_col.mean(), "p_loss", p_loss_col.mean())
+
+        self.buffer.reset()
 
 
 
+    def load_best_weights(self, path=None):
 
+        if path is None:
+            path = os.path.join(
+                    self.save_folder,
+                    'best.pth'
+                )
 
-
-
-#     def update_iteratively(self):
-
-#         dataloader = self.create_dataloader(
-#             self.buffer.get())
-
-#         for data in dataloader:
-
-#             loss = self.loss(data)
-#             loss.backward()
-
-#             # if self.value_optim is not None:
-#                 # self.value_optim.step()
-#                 # self.value_optim.zero_grad()
-
-#             torch.nn.utils.clip_grad_norm_(self.agent.parameters(), self.max_grad_norm)
-#             self.policy_optim.step()
-#             self.policy_optim.zero_grad()
-
-#         self.buffer.reset()
-
-
-# class BufferDataset(Dataset):
-
-#     def __init__(self, data):
-#         super().__init__()
-
-#         self.states, self.act, self.rtg, self.adv, self.log_prob = data
-
-#     def __getitem__(self, index):
-#         return self.states[index], self.act[index], self.rtg[index], self.adv[index], self.log_prob[index]
-
-#     def __len__(self):
-#         return len(self.rtg)
+        self.agent.load_state_dict(
+            torch.load(
+                path
+            )
+        )
