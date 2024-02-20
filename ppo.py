@@ -88,7 +88,7 @@ class PPO:
             env, 
             agent, 
             seed=0, 
-            epochs=200, 
+            epochs=50, 
             batch_size=64, 
             iters_per_epoch=8000, 
             optim_iters=10, 

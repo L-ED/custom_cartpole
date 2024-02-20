@@ -100,9 +100,7 @@ class ActorCritic(torch.nn.Module):
 
     def act(self, obs):
         with torch.no_grad():
-            distrib = Categorical(
-                logits=self.policy(obs))
-            return torch.argmax(distrib.probs, dim=1)
+            return torch.argmax(self.policy(obs), dim=1)
 
     def step(self, obs):
         with torch.no_grad():

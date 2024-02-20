@@ -37,7 +37,7 @@ class CustomCartpole(CartPoleEnv):
         self.state = state
         self.steps = 0
 
-        return state , info
+        return state.copy() , info
 
 
     def step(self, action):

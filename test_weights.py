@@ -7,7 +7,7 @@ from env import CustomCartpole
 from agent import ActorCritic
 from ppo import PPO
 
-def main(test=True):
+def main():
 
     env = CustomCartpole("human")
 
@@ -19,13 +19,12 @@ def main(test=True):
     trainer = PPO(
         env,agent
     )
-    trainer.load_best_weights('')
-
+    trainer.load_best_weights()
     state, _ =  env.reset()
     while True:
+        state = env.normalize_state(state)
         state = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0)
-        action, val, log_prob = agent.step(state)
-        # action = agent.act(state)
+        action = agent.act(state)
 
         state,rew,term,trunc,_ = env.step(action.item())
         if term or trunc:
